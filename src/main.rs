@@ -1,55 +1,25 @@
-#![deny(warnings)]
+use std::{
+    io::{prelude::*, BufReader},
+    net::{TcpListener, TcpStream},
+};
 
-use std::future::Future;
-use std::net::SocketAddr;
-use std::pin::Pin;
+fn main() {
+    let listener = TcpListener::bind("127.0.0.1:8090").unwrap();
 
-use bytes::Bytes;
-use http_body_util::Full;
-use hyper::server::conn::http1;
-use hyper::service::Service;
-use hyper::{body::Incoming as IncomingBody, Request, Response};
-use tokio::net::TcpListener;
+    for stream in listener.incoming() {
+        let stream = stream.unwrap();
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-
-    // We create a TcpListener and bind it to 127.0.0.1:3000
-    let listener = TcpListener::bind(addr).await?;
-
-    // We start a loop to continuously accept incoming connections
-    loop {
-        let (stream, _) = listener.accept().await?;
-
-        // Spawn a tokio task to serve multiple connections concurrently
-        tokio::task::spawn(async move {
-            if let Err(err) = http1::Builder::new().serve_connection(stream, Svc {}).await {
-                println!("Failed to serve connection: {:?}", err);
-            }
-        });
+        handle_connection(stream);
     }
 }
 
-struct Svc {}
+fn handle_connection(mut stream: TcpStream) {
+    let buf_reader = BufReader::new(&mut stream);
+    let http_request: Vec<_> = buf_reader
+        .lines()
+        .map(|result| result.unwrap())
+        .take_while(|line| !line.is_empty())
+        .collect();
 
-impl Service<Request<IncomingBody>> for Svc {
-    type Response = Response<Full<Bytes>>;
-    type Error = hyper::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
-
-    fn call(&mut self, req: Request<IncomingBody>) -> Self::Future {
-        fn mk_response(s: String) -> Result<Response<Full<Bytes>>, hyper::Error> {
-            Ok(Response::builder().body(Full::new(Bytes::from(s))).unwrap())
-        }
-
-        let res = match req.uri().path() {
-            "/" => mk_response(format!("home")),
-            "/posts" => mk_response(format!("posts")),
-            "/authors" => mk_response(format!("authors")),
-            _ => return Box::pin(async { mk_response("not found".into()) }),
-        };
-
-        Box::pin(async { res })
-    }
+    println!("Request: {:#?}", http_request);
 }
