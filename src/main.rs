@@ -1,18 +1,15 @@
 #![deny(warnings)]
 
-use std::convert::Infallible;
+use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper::{Request, Response};
+use hyper::service::Service;
+use hyper::{body::Incoming as IncomingBody, Request, Response};
 use tokio::net::TcpListener;
-
-async fn hello(_: Request<hyper::body::Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
-    Ok(Response::new(Full::new(Bytes::from("Hello, World!"))))
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -27,14 +24,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // Spawn a tokio task to serve multiple connections concurrently
         tokio::task::spawn(async move {
-            // Finally, we bind the incoming connection to our `hello` service
-            if let Err(err) = http1::Builder::new()
-                // `service_fn` converts our function in a `Service`
-                .serve_connection(stream, service_fn(hello))
-                .await
-            {
-                println!("Error serving connection: {:?}", err);
+            if let Err(err) = http1::Builder::new().serve_connection(stream, Svc {}).await {
+                println!("Failed to serve connection: {:?}", err);
             }
         });
+    }
+}
+
+struct Svc {}
+
+impl Service<Request<IncomingBody>> for Svc {
+    type Response = Response<Full<Bytes>>;
+    type Error = hyper::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn call(&mut self, req: Request<IncomingBody>) -> Self::Future {
+        fn mk_response(s: String) -> Result<Response<Full<Bytes>>, hyper::Error> {
+            Ok(Response::builder().body(Full::new(Bytes::from(s))).unwrap())
+        }
+
+        let res = match req.uri().path() {
+            "/" => mk_response(format!("home")),
+            "/posts" => mk_response(format!("posts")),
+            "/authors" => mk_response(format!("authors")),
+            _ => return Box::pin(async { mk_response("not found".into()) }),
+        };
+
+        Box::pin(async { res })
     }
 }
