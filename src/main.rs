@@ -3,7 +3,7 @@ use todo::Server;
 
 fn main() {
     let mut server = Server::new();
-    server.GET("/".to_string(), handle_request);
+    server.get("/".to_string(), handle_request);
 
     server.serve();
 }

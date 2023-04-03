@@ -113,7 +113,7 @@ impl Server {
         }
     }
 
-    pub fn GET(&mut self, path: String, handler: Handler) {
+    pub fn get(&mut self, path: String, handler: Handler) {
         self.router.add_route(path, handler);
     }
 
