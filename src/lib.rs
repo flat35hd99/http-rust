@@ -114,7 +114,11 @@ impl Server {
     }
 
     pub fn get(&mut self, path: String, handler: Handler) {
-        self.router.add_route(path, handler);
+        self.router.add_route(Method::GET, path, handler);
+    }
+
+    pub fn post(&mut self, path: String, handler: Handler) {
+        self.router.add_route(Method::POST, path, handler);
     }
 
     pub fn serve(self) {
@@ -145,8 +149,8 @@ impl Router {
             map: std::collections::HashMap::new(),
         }
     }
-    pub fn add_route(&mut self, path: String, handler: Handler) {
-        self.map.insert((Method::GET, path), handler);
+    pub fn add_route(&mut self, method: Method, path: String, handler: Handler) {
+        self.map.insert((method, path), handler);
     }
     pub fn handle_connection(&self, mut stream: TcpStream) {
         let buf_reader = BufReader::new(&mut stream);
