@@ -1,7 +1,10 @@
 use std::{
-    sync::{mpsc, Arc, Mutex},
+    sync::{mpsc, Arc, Mutex, RwLock},
     thread,
+    net::{TcpListener, TcpStream}, io::{BufReader, BufRead, Write}, str::FromStr,
 };
+
+use http::Request;
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
@@ -90,5 +93,84 @@ impl Worker {
             id,
             thread: Some(thread),
         }
+    }
+}
+
+pub struct Server {
+    router: Router,
+    thread_pool: ThreadPool,
+}
+
+type Handler = fn(Request<()>) -> http::Result<http::Response<()>, >;
+
+impl Server {
+    pub fn new() -> Server {
+        Server {
+            router: Router::new(),
+            thread_pool: ThreadPool::new(4),
+        }
+    }
+
+    pub fn GET(&mut self, path: String, handler: Handler) {
+        self.router.add_route(path, handler);
+    }
+
+    pub fn serve(self) {
+        let listener = TcpListener::bind("127.0.0.1:8090").unwrap();
+
+        let shared_router = Arc::new(RwLock::new(self.router));
+
+        for stream in listener.incoming() {
+            let stream = stream.unwrap();
+            let router = shared_router.clone();
+
+            self.thread_pool.execute(move || {
+                router.read().unwrap().handle_connection(stream);
+            })
+        }
+    }
+}
+
+type Route = (Method, String);
+
+struct Router {
+    map: std::collections::HashMap<Route, Handler>
+}
+use http::Method;
+impl Router {
+    pub fn new() -> Router {
+        Router { map: std::collections::HashMap::new() }
+    }
+    pub fn add_route(&mut self, path: String, handler: Handler) {
+        self.map.insert((Method::GET, path), handler);
+    }
+    pub fn handle_connection(&self, mut stream: TcpStream) {
+        let buf_reader = BufReader::new(&mut stream);
+        let mut lines = buf_reader.lines();
+    
+        // According to it should be 
+        // GET / HTTP/1.1
+        let binding = lines.next().unwrap().unwrap();
+        let mut request_line  = binding.split_whitespace();
+        let method = Method::from_str(request_line.next().unwrap()).unwrap();
+        let path = request_line.next().unwrap();
+
+        let response = match (method, path) {
+            (Method::GET, "/") => {
+                let status_line = "HTTP/1.1 200 OK";
+                let contents = "hello, world!\n".to_string();
+                let length = contents.len();
+                let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+                response
+            }
+            _ => {
+                let status_line = "HTTP/1.1 404 NOT FOUND";
+                let contents = "not found\n".to_string();
+                let length = contents.len();
+                let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
+                response
+            }
+        };
+        stream.write_all(response.as_bytes()).unwrap();
     }
 }
