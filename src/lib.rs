@@ -1,7 +1,9 @@
 use std::{
+    io::{BufRead, BufReader, Write},
+    net::{TcpListener, TcpStream},
+    str::FromStr,
     sync::{mpsc, Arc, Mutex, RwLock},
     thread,
-    net::{TcpListener, TcpStream}, io::{BufReader, BufRead, Write}, str::FromStr,
 };
 
 use http::{Request, Response, StatusCode};
@@ -134,12 +136,14 @@ impl Server {
 type Route = (Method, String);
 
 struct Router {
-    map: std::collections::HashMap<Route, Handler>
+    map: std::collections::HashMap<Route, Handler>,
 }
 use http::Method;
 impl Router {
     pub fn new() -> Router {
-        Router { map: std::collections::HashMap::new() }
+        Router {
+            map: std::collections::HashMap::new(),
+        }
     }
     pub fn add_route(&mut self, path: String, handler: Handler) {
         self.map.insert((Method::GET, path), handler);
@@ -147,36 +151,44 @@ impl Router {
     pub fn handle_connection(&self, mut stream: TcpStream) {
         let buf_reader = BufReader::new(&mut stream);
         let mut lines = buf_reader.lines();
-    
-        // According to it should be 
+
+        // According to it should be
         // GET / HTTP/1.1
         let binding = lines.next().unwrap().unwrap();
-        let mut request_line  = binding.split_whitespace();
+        let mut request_line = binding.split_whitespace();
         let method = Method::from_str(request_line.next().unwrap()).unwrap();
         let path = request_line.next().unwrap().to_string();
 
         // ここのcloneは取れる気がする
         let handler = self.map.get(&(method.clone(), path.clone()));
 
-        let request = Request::builder().method(method).uri("http://example.com".to_owned() + &path).body(()).unwrap();
+        let request = Request::builder()
+            .method(method)
+            .uri("http://example.com".to_owned() + &path)
+            .body(())
+            .unwrap();
 
         let response = match handler {
             Some(h) => h(request),
-            None => {
-                Response::builder().status(StatusCode::NOT_FOUND).body("NOT FOUND".to_string()).unwrap()
-            }
+            None => Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body("NOT FOUND".to_string())
+                .unwrap(),
         };
 
         let status_line = "HTTP/1.1 ".to_owned() + response.status().as_str();
-        let headers: String = response.headers().iter().map(|(k, v)| {
-            let v = v.to_str().unwrap();
-            format!("{k}: {v}\r\n")
-        }).collect();
+        let headers: String = response
+            .headers()
+            .iter()
+            .map(|(k, v)| {
+                let v = v.to_str().unwrap();
+                format!("{k}: {v}\r\n")
+            })
+            .collect();
         let body: String = response.body().to_string();
 
         let res = format!("{status_line}\r\n{headers}\r\n{body}");
 
         stream.write_all(res.as_bytes()).unwrap();
-
     }
 }

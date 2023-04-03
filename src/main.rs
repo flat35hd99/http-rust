@@ -1,5 +1,5 @@
-use todo::{Server};
 use http::{Request, Response, StatusCode};
+use todo::Server;
 
 fn main() {
     let mut server = Server::new();
@@ -9,7 +9,8 @@ fn main() {
 }
 
 fn handle_request(_req: Request<()>) -> Response<String> {
-    // let res = Response::builder().status(StatusCode::OK);
-    // res.body("Hello, World!\n".to_string())
-    Response::builder().status(StatusCode::OK).body("hgoe".to_string()).unwrap()
+    Response::builder()
+        .status(StatusCode::OK)
+        .body("Hello, World!".to_string())
+        .unwrap()
 }
