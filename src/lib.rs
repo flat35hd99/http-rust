@@ -4,7 +4,7 @@ use std::{
     net::{TcpListener, TcpStream}, io::{BufReader, BufRead, Write}, str::FromStr,
 };
 
-use http::Request;
+use http::{Request, Response, StatusCode};
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
@@ -101,7 +101,7 @@ pub struct Server {
     thread_pool: ThreadPool,
 }
 
-type Handler = fn(Request<()>) -> http::Result<http::Response<()>, >;
+type Handler = fn(Request<()>) -> http::Response<String>;
 
 impl Server {
     pub fn new() -> Server {
@@ -153,24 +153,30 @@ impl Router {
         let binding = lines.next().unwrap().unwrap();
         let mut request_line  = binding.split_whitespace();
         let method = Method::from_str(request_line.next().unwrap()).unwrap();
-        let path = request_line.next().unwrap();
+        let path = request_line.next().unwrap().to_string();
 
-        let response = match (method, path) {
-            (Method::GET, "/") => {
-                let status_line = "HTTP/1.1 200 OK";
-                let contents = "hello, world!\n".to_string();
-                let length = contents.len();
-                let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
-                response
-            }
-            _ => {
-                let status_line = "HTTP/1.1 404 NOT FOUND";
-                let contents = "not found\n".to_string();
-                let length = contents.len();
-                let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
-                response
+        // ここのcloneは取れる気がする
+        let handler = self.map.get(&(method.clone(), path.clone()));
+
+        let request = Request::builder().method(method).uri("http://example.com".to_owned() + &path).body(()).unwrap();
+
+        let response = match handler {
+            Some(h) => h(request),
+            None => {
+                Response::builder().status(StatusCode::NOT_FOUND).body("NOT FOUND".to_string()).unwrap()
             }
         };
-        stream.write_all(response.as_bytes()).unwrap();
+
+        let status_line = "HTTP/1.1 ".to_owned() + response.status().as_str();
+        let headers: String = response.headers().iter().map(|(k, v)| {
+            let v = v.to_str().unwrap();
+            format!("{k}: {v}\r\n")
+        }).collect();
+        let body: String = response.body().to_string();
+
+        let res = format!("{status_line}\r\n{headers}\r\n{body}");
+
+        stream.write_all(res.as_bytes()).unwrap();
+
     }
 }
