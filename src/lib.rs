@@ -6,7 +6,7 @@ use std::{
     thread,
 };
 
-use http::{Request, Response, StatusCode};
+use http::{HeaderName, HeaderValue, Request, Response, StatusCode};
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
@@ -103,7 +103,7 @@ pub struct Server {
     thread_pool: ThreadPool,
 }
 
-type Handler = fn(Request<()>) -> http::Response<String>;
+type Handler = fn(Request<BufReader<TcpStream>>) -> http::Response<String>;
 
 impl Server {
     pub fn new() -> Server {
@@ -113,16 +113,18 @@ impl Server {
         }
     }
 
-    pub fn get(&mut self, path: String, handler: Handler) {
-        self.router.add_route(Method::GET, path, handler);
+    pub fn get(&mut self, path: &str, handler: Handler) {
+        self.router
+            .add_route(Method::GET, path.to_string(), handler);
     }
 
-    pub fn post(&mut self, path: String, handler: Handler) {
-        self.router.add_route(Method::POST, path, handler);
+    pub fn post(&mut self, path: &str, handler: Handler) {
+        self.router
+            .add_route(Method::POST, path.to_string(), handler);
     }
 
     pub fn serve(self) {
-        let listener = TcpListener::bind("127.0.0.1:8090").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:8091").unwrap();
 
         let shared_router = Arc::new(RwLock::new(self.router));
 
@@ -156,21 +158,47 @@ impl Router {
         let buf_reader = BufReader::new(&mut stream);
         let mut lines = buf_reader.lines();
 
-        // According to it should be
-        // GET / HTTP/1.1
+        // request lineを処理してRequestを作成
         let binding = lines.next().unwrap().unwrap();
         let mut request_line = binding.split_whitespace();
         let method = Method::from_str(request_line.next().unwrap()).unwrap();
         let path = request_line.next().unwrap().to_string();
 
-        // ここのcloneは取れる気がする
-        let handler = self.map.get(&(method.clone(), path.clone()));
+        let mut request = Request::builder()
+            .method(method.clone())
+            .uri("http://example.com".to_owned() + &path);
 
-        let request = Request::builder()
-            .method(method)
-            .uri("http://example.com".to_owned() + &path)
-            .body(())
-            .unwrap();
+        // Headersを取得
+        let headers = request.headers_mut().unwrap();
+        loop {
+            // 空行ならHeader行が終了している
+            // HeaderとBodyは二行空いているので、もう一度行を読み込み、
+            // 空行であることを確認してループを出る
+            let l = lines.next().unwrap().unwrap();
+            if l == "".to_string() {
+                if lines.next().unwrap().unwrap() == "".to_string() {
+                    break;
+                } else {
+                    panic!("irregal http request. two lines required between headers and body but only 1 found.");
+                }
+            }
+
+            if let Some((key, value)) = l.split_once(": ") {
+                // request.header(key, value);
+                headers.append(
+                    HeaderName::from_str(key.to_string().to_owned().as_str()).unwrap(),
+                    HeaderValue::from_str(value.to_string().to_owned().as_str()).unwrap(),
+                );
+            }
+        }
+
+        // Bodyを取得
+        let body = BufReader::new(&mut stream);
+
+        let request = request.body(body).unwrap();
+
+        // ここのcloneは取れる気がする
+        let handler = self.map.get(&(method, path.clone()));
 
         let response = match handler {
             Some(h) => h(request),
